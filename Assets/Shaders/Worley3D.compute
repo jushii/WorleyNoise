@@ -1,0 +1,83 @@
+﻿#pragma kernel CSWorley3D
+
+int _Resolution;
+int _CellResolution;
+int _AxisCellCount;
+StructuredBuffer<float3> _FeaturePoints;
+RWTexture3D<float4> _Result;
+
+static const int3 CellOffsets[] =
+{
+    int3(-1, -1, -1),
+    int3(0, -1, -1),
+    int3(1, -1, -1),
+    int3(-1, -1, 0),
+    int3(0, -1, 0),
+    int3(1, -1, 0),
+    int3(-1, -1, 1),
+    int3(0, -1, 1),
+    int3(1, -1, 1),
+    int3(-1, 0, -1),
+    int3(0, 0, -1),
+    int3(1, 0, -1),
+    int3(-1, 0, 0),
+    int3(0, 0, 0),
+    int3(1, 0, 0),
+    int3(-1, 0, 1),
+    int3(0, 0, 1),
+    int3(1, 0, 1),
+    int3(-1, 1, -1),
+    int3(0, 1, -1),
+    int3(1, 1, -1),
+    int3(-1, 1, 0),
+    int3(0, 1, 0),
+    int3(1, 1, 0),
+    int3(-1, 1, 1),
+    int3(0, 1, 1),
+    int3(1, 1, 1),
+};
+
+[numthreads(8,8,8)]
+void CSWorley3D (uint3 id : SV_DispatchThreadID)
+{
+    // Get the sample position.
+    float3 samplePosition = float3(id.x, id.y, id.z);
+    
+    // Get the cell the sample position belongs to.
+    int3 samplePositionCellCoordinate = floor(samplePosition / _CellResolution);
+    
+    // Get the position inside the cell.
+    float3 localizedSamplePosition = float3(samplePosition / _CellResolution - samplePositionCellCoordinate);
+
+    // Find the feature point nearest to the sample position by searching the surrounding cells.
+    // This search will also include the cell the sample position belongs to.
+    float minDistance = 1.0;
+    for (int offsetIndex = 0; offsetIndex < 27; offsetIndex++)
+    {
+        // Get the coordinate of the cell we're evaluating.
+        int3 cellCoordinate = samplePositionCellCoordinate + CellOffsets[offsetIndex];        
+        int x = cellCoordinate.x;
+        int y = cellCoordinate.y;
+        int z = cellCoordinate.z;
+        
+        // Check if the checked cell coordinates are outside the "cell map" boundaries.
+        if (x == -1 || x == _AxisCellCount || y == -1 || y == _AxisCellCount || z == -1 || z == _AxisCellCount)
+        {
+            // Wrap around the cell grid to find the distance to a feature point in a cell on the opposite side.
+            int3 wrappedCellCoordinate = fmod(cellCoordinate + _AxisCellCount, (int3)_AxisCellCount);
+            int wrappedCellIndex = wrappedCellCoordinate.x + _AxisCellCount * (wrappedCellCoordinate.y + wrappedCellCoordinate.z * _AxisCellCount);
+            float3 featurePointOffset = cellCoordinate + _FeaturePoints[wrappedCellIndex];
+            minDistance = min(minDistance, distance(samplePositionCellCoordinate + localizedSamplePosition, featurePointOffset));
+        }
+        else
+        {
+            // The checked cell is inside the "cell map" boundaries. Check the distance to the feature point.
+            int cellIndex = cellCoordinate.x + _AxisCellCount * (cellCoordinate.y + cellCoordinate.z * _AxisCellCount);
+            float3 featurePointOffset = cellCoordinate + _FeaturePoints[cellIndex];
+            minDistance = min(minDistance, distance(samplePositionCellCoordinate + localizedSamplePosition, featurePointOffset));
+        }
+    }
+
+    // Set the color of the coordinate in the resulting texture.
+    _Result[id.xyz] = 1.0 - minDistance;
+}
